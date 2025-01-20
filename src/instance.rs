@@ -348,4 +348,14 @@ impl Instance {
         writeln!(writer, "End")?;
         Ok(())
     }
+
+    pub fn export_as_text(&self, mut writer: impl Write) -> Result<()> {
+        for &edge in self.edges() {
+            for node in self.edge(edge) {
+                write!(writer, " {}", node.idx())?;
+            }
+            writeln!(writer)?;
+        }
+        Ok(())
+    }
 }

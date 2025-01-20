@@ -203,3 +203,34 @@ pub fn solve(
 
     Ok((state.minimum_hs, report))
 }
+
+pub fn only_reduce(
+    mut instance: Instance,
+    file_name: String,
+    settings: Settings,
+) -> Result<(Instance, ReductionResult, Vec<NodeIdx>)> {
+    let initial_hs = get_initial_hitting_set(&instance, &settings)?;
+    let root_bounds = calculate_root_bounds(&instance, &settings);
+    let packing_from_scratch_limit = settings.packing_from_scratch_limit;
+    let mut report = Report {
+        file_name,
+        opt: initial_hs.len(),
+        branching_steps: 0,
+        settings,
+        root_bounds,
+        runtimes: RuntimeStats::default(),
+        reductions: ReductionStats::new(packing_from_scratch_limit),
+        upper_bound_improvements: Vec::new(),
+    };
+
+    let mut state = State {
+        partial_hs: Vec::new(),
+        minimum_hs: initial_hs,
+        last_log_time: Instant::now(),
+        solve_start_time: Instant::now(),
+    };
+
+    let (reduction_result, _) = reductions::reduce(&mut instance, &mut state, &mut report);
+
+    Ok((instance, reduction_result, state.partial_hs))
+}

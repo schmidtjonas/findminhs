@@ -36,6 +36,9 @@ enum CliOpts {
 
     /// Convert a hypergraph into an equivalent ILP
     Ilp(IlpOpts),
+
+    /// Only apply reduction rules and then write back to file
+    Reduce(ReduceOpts),
 }
 
 #[derive(Debug, StructOpt)]
@@ -98,6 +101,24 @@ struct SolveOpts {
     report: Option<PathBuf>,
 }
 
+#[derive(Debug, StructOpt)]
+struct ReduceOpts {
+    #[structopt(flatten)]
+    common: CommonOpts,
+
+    /// Solver settings
+    #[structopt(parse(from_os_str), value_name = "settings-file")]
+    settings: PathBuf,
+
+    /// Write the reduced hypergraph to this file
+    #[structopt(short, long, parse(from_os_str), value_name = "file")]
+    output: Option<PathBuf>,
+
+    /// Write the partial hitting set to this file as a json array
+    #[structopt(short, long, parse(from_os_str), value_name = "file")]
+    partial_solution: Option<PathBuf>,
+}
+
 fn solve(opts: SolveOpts) -> Result<()> {
     let file_name = opts
         .common
@@ -124,6 +145,39 @@ fn solve(opts: SolveOpts) -> Result<()> {
         debug!("Writing report to {}", report_file.display());
         let writer = BufWriter::new(File::create(&report_file)?);
         serde_json::to_writer(writer, &report)?;
+    }
+
+    Ok(())
+}
+
+fn reduce(opts: ReduceOpts) -> Result<()> {
+    let file_name = opts
+        .common
+        .hypergraph
+        .file_name()
+        .and_then(OsStr::to_str)
+        .ok_or_else(|| anyhow!("File name can't be extracted"))?
+        .to_string();
+    let instance = opts.common.load_instance()?;
+    let settings = {
+        let reader = BufReader::new(File::open(&opts.settings)?);
+        serde_json::from_reader(reader)?
+    };
+
+    info!("Reducing {:?}", &opts.common.hypergraph);
+    let (reduced_instance, _reduction_result, partial_hs) =
+        solve::only_reduce(instance, file_name, settings)?;
+
+    if let Some(instance_file) = opts.output {
+        debug!("Writing remaining instance to {}", instance_file.display());
+        let writer = BufWriter::new(File::create(&instance_file)?);
+        reduced_instance.export_as_text(writer)?;
+    }
+
+    if let Some(partial_solution_file) = opts.partial_solution {
+        debug!("Writing solution to {}", partial_solution_file.display());
+        let writer = BufWriter::new(File::create(&partial_solution_file)?);
+        serde_json::to_writer(writer, &partial_hs)?;
     }
 
     Ok(())
@@ -159,5 +213,6 @@ fn main() -> Result<()> {
     match opts {
         CliOpts::Solve(solve_opts) => solve(solve_opts),
         CliOpts::Ilp(ilp_opts) => convert_to_ilp(ilp_opts),
+        CliOpts::Reduce(reduce_opts) => reduce(reduce_opts),
     }
 }
