@@ -12,6 +12,7 @@ use std::{
     collections::BinaryHeap,
     time::{Duration, Instant},
 };
+use std::sync::atomic::Ordering;
 
 #[derive(Copy, Clone, Debug)]
 enum ReducedItem {
@@ -298,6 +299,7 @@ pub fn reduce(
 
     let mut reduced_items = Vec::new();
     let result = loop {
+        info!("red loop");
         if state.partial_hs.len() >= state.minimum_hs.len() {
             break ReductionResult::Unsolvable;
         }
@@ -314,6 +316,10 @@ pub fn reduce(
             if state.partial_hs.len() >= state.minimum_hs.len() {
                 break ReductionResult::Unsolvable;
             }
+        }
+
+        if state.term.load(Ordering::Relaxed) {
+            break ReductionResult::Stop;
         }
 
         let mut lower_bound_breakpoint = state.minimum_hs.len() - state.partial_hs.len();

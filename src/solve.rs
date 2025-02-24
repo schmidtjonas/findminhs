@@ -1,3 +1,4 @@
+use std::sync::Arc;
 use crate::{
     instance::{Instance, NodeIdx},
     lower_bound::{self, PackingBound},
@@ -8,6 +9,8 @@ use crate::{
 use anyhow::{ensure, Result};
 use log::{debug, info, trace, warn};
 use std::time::Instant;
+use signal_hook::{self, consts::SIGUSR1};
+use std::sync::atomic::{AtomicBool, Ordering};
 
 const ITERATION_LOG_INTERVAL_SECS: u64 = 60;
 
@@ -17,6 +20,7 @@ pub struct State {
     pub minimum_hs: Vec<NodeIdx>,
     pub solve_start_time: Instant,
     pub last_log_time: Instant,
+    pub term: Arc<AtomicBool>,
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
@@ -65,6 +69,12 @@ fn solve_recursive(instance: &mut Instance, state: &mut State, report: &mut Repo
         state.last_log_time = now;
     }
 
+    if state.term.load(Ordering::Relaxed) {
+        info!("Terminating with a HS of size {}", state.minimum_hs.len());
+        return Status::Stop;
+    }
+
+    info!("reduction");
     let (reduction_result, reduction) = reductions::reduce(instance, state, report);
     let status = match reduction_result {
         ReductionResult::Solved => {
@@ -100,6 +110,7 @@ fn solve_recursive(instance: &mut Instance, state: &mut State, report: &mut Repo
                 .copied()
                 .max_by_key(|&node| instance.node_degree(node))
                 .expect("Branching on an empty instance");
+            info!("branching");
             branch_on(node, instance, state, report)
         }
     };
@@ -178,7 +189,11 @@ pub fn solve(
         minimum_hs: initial_hs,
         last_log_time: Instant::now(),
         solve_start_time: Instant::now(),
+        term: Arc::new(AtomicBool::new(false)),
     };
+
+    signal_hook::flag::register(SIGUSR1, Arc::clone(&state.term))?;
+
     let status = solve_recursive(&mut instance, &mut state, &mut report);
     report.runtimes.total = state.solve_start_time.elapsed();
     report.opt = state.minimum_hs.len();
@@ -195,8 +210,8 @@ pub fn solve(
         );
     } else {
         info!(
-            "Found hitting set <= {} in {:.2?} and {} branching steps",
-            report.settings.stop_at, report.runtimes.total, report.branching_steps
+            "Found hitting set of size {} in {:.2?} and {} branching steps",
+            state.minimum_hs.len(), report.runtimes.total, report.branching_steps
         );
     }
     debug!("Final HS (size {}): {:?}", report.opt, &state.minimum_hs);
@@ -228,6 +243,7 @@ pub fn only_reduce(
         minimum_hs: initial_hs,
         last_log_time: Instant::now(),
         solve_start_time: Instant::now(),
+        term: Arc::new(AtomicBool::new(false)),
     };
 
     let (reduction_result, _) = reductions::reduce(&mut instance, &mut state, &mut report);
